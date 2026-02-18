@@ -20,6 +20,7 @@ package runner
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	goplugin "plugin"
 	"strings"
@@ -91,6 +92,15 @@ func LoadGoPlugins(basicRes context.BasicRes) errors.Error {
 func LoadRemotePlugins(basicRes context.BasicRes) errors.Error {
 	remotePluginDir := basicRes.GetConfig("REMOTE_PLUGIN_DIR")
 	if remotePluginDir != "" {
+		if stat, statErr := os.Stat(remotePluginDir); statErr != nil {
+			if os.IsNotExist(statErr) {
+				basicRes.GetLogger().Info("remote plugin directory not found, skipping: %s", remotePluginDir)
+				return nil
+			}
+			return errors.Convert(statErr)
+		} else if !stat.IsDir() {
+			return errors.Default.New("REMOTE_PLUGIN_DIR is not a directory: " + remotePluginDir)
+		}
 		basicRes.GetLogger().Info("Loading remote plugins")
 		remote.Init(basicRes)
 		walkErr := filepath.WalkDir(remotePluginDir, func(path string, d fs.DirEntry, err error) error {
