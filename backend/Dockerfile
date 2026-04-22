@@ -23,15 +23,24 @@
 #While incubation status is not necessarily a reflection of the completeness or stability of the code,
 #it does indicate that the project has yet to be fully endorsed by the ASF.
 
-FROM --platform=linux/amd64 debian:bookworm as debian-amd64
-RUN apt-get update
-RUN apt-get install -y libssh2-1-dev libssl-dev zlib1g-dev
+# ---------------------------------------------------------------------------
+# Sysroot stages — provide arch-specific headers and shared libs for
+# cross-compiling libgit2 and the Go plugins in the builder stage.
+# Pinned to a specific Debian bookworm snapshot for reproducibility.
+# ---------------------------------------------------------------------------
+FROM --platform=linux/amd64 debian:bookworm-20260112 AS debian-amd64
+RUN apt-get update && \
+    apt-get install -y libssh2-1-dev libssl-dev zlib1g-dev
 
-FROM --platform=linux/arm64 debian:bookworm as debian-arm64
-RUN apt-get update
-RUN apt-get install -y libssh2-1-dev libssl-dev zlib1g-dev
+FROM --platform=linux/arm64 debian:bookworm-20260112 AS debian-arm64
+RUN apt-get update && \
+    apt-get install -y libssh2-1-dev libssl-dev zlib1g-dev
 
-FROM --platform=$BUILDPLATFORM golang:1.20.5-bookworm as builder
+# ---------------------------------------------------------------------------
+# Builder stage — compiles libgit2 for both aarch64 and x86_64, then builds
+# all Go binaries and plugins.
+# ---------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM golang:1.23.12-bookworm AS builder
 
 # docker build --build-arg GOPROXY=https://goproxy.io,direct -t mericodev/lake .
 ARG GOPROXY=
@@ -39,8 +48,12 @@ ARG GOPROXY=
 ARG HTTP_PROXY=
 ARG HTTPS_PROXY=
 
-RUN apt-get update
-RUN apt-get install -y gcc binutils libfindbin-libs-perl cmake libssh2-1-dev libssl-dev zlib1g-dev
+# Disable remote (Python) plugin loading — avoids startup failure when
+# REMOTE_PLUGIN_DIR is absent, which is always the case in this no-python image.
+ENV DISABLED_REMOTE_PLUGINS=true
+
+RUN apt-get update && \
+    apt-get install -y gcc binutils libfindbin-libs-perl cmake libssh2-1-dev libssl-dev zlib1g-dev wget
 
 RUN if [ "$(arch)" != "aarch64" ] ; then \
         apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu ; \
@@ -49,9 +62,10 @@ RUN if [ "$(arch)" != "x86_64" ] ; then \
         apt-get install -y gcc-x86-64-linux-gnu binutils-x86-64-linux-gnu ; \
     fi
 
-RUN go install github.com/vektra/mockery/v2@v2.20.0
+RUN go install github.com/vektra/mockery/v2@v2.42.0
 RUN go install github.com/swaggo/swag/cmd/swag@v1.16.1
 
+# Copy arch-specific sysroots for cross-compilation
 COPY --from=debian-amd64 /usr/include /rootfs-amd64/usr/include
 COPY --from=debian-amd64 /usr/lib/x86_64-linux-gnu /rootfs-amd64/usr/lib/x86_64-linux-gnu
 COPY --from=debian-amd64 /lib/x86_64-linux-gnu /rootfs-amd64/lib/x86_64-linux-gnu
@@ -60,7 +74,10 @@ COPY --from=debian-arm64 /usr/include /rootfs-arm64/usr/include
 COPY --from=debian-arm64 /usr/lib/aarch64-linux-gnu /rootfs-arm64/usr/lib/aarch64-linux-gnu
 COPY --from=debian-arm64 /lib/aarch64-linux-gnu /rootfs-arm64/lib/aarch64-linux-gnu
 
+# Remove static libraries from sysroots — not needed at runtime, reduces image size
+RUN find /rootfs-amd64 /rootfs-arm64 -name '*.a' -delete
 
+# Cross-compile libgit2 v1.3.2 for both aarch64 and x86_64
 RUN for arch in aarch64 x86_64 ; do \
         mkdir -p /tmp/build/${arch} && cd /tmp/build/${arch} && \
         wget https://github.com/libgit2/libgit2/archive/refs/tags/v1.3.2.tar.gz -O - | tar -xz && \
@@ -69,17 +86,21 @@ RUN for arch in aarch64 x86_64 ; do \
         if [ "$arch" = "aarch64" ] ; then \
             cmake .. -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
                 -DBUILD_SHARED_LIBS=ON -DCMAKE_SYSROOT=/rootfs-arm64 \
-                -DCMAKE_INSTALL_PREFIX=/usr/local/deps/${arch} ; \
+                -DCMAKE_INSTALL_PREFIX=/usr/local/deps/${arch} \
+                -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DBUILD_EXAMPLES=OFF ; \
         elif [ "$arch" = "x86_64" ] ; then \
             cmake .. -DCMAKE_C_COMPILER=x86_64-linux-gnu-gcc \
                 -DBUILD_SHARED_LIBS=ON -DCMAKE_SYSROOT=/rootfs-amd64 \
-                -DCMAKE_INSTALL_PREFIX=/usr/local/deps/${arch} ; \
+                -DCMAKE_INSTALL_PREFIX=/usr/local/deps/${arch} \
+                -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DBUILD_EXAMPLES=OFF ; \
         fi && \
         make -j install ; \
     done
 
-
-FROM builder as build
+# ---------------------------------------------------------------------------
+# Build stage — compiles the DevLake server and plugins
+# ---------------------------------------------------------------------------
+FROM builder AS build
 
 WORKDIR /app
 COPY . /app
@@ -89,6 +110,13 @@ ARG TARGETPLATFORM
 ARG TAG=
 ARG SHA=
 ARG GO_PLUGINS=
+
+# VERSION is required — the build will fail with a clear error if not provided.
+# Pass it at build time: docker build --build-arg VERSION=v1.0.3-harden-r1 ...
+# It is embedded in the binary via -ldflags and surfaced in the DevLake UI.
+ARG VERSION
+RUN test -n "$VERSION" || \
+    (echo "ERROR: VERSION build arg is required. Use --build-arg VERSION=<value>" && exit 1)
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     if [ "$TARGETPLATFORM" = "linux/arm64" ] ; then \
@@ -101,10 +129,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
         export GOARCH=amd64 ; \
     fi && \
     export PKG_CONFIG_PATH=/usr/local/deps/target/lib/pkgconfig && \
-    export CGO_ENABLED=1 &&\
-    DEVLAKE_PLUGINS="$GO_PLUGINS" make all
+    export CGO_ENABLED=1 && \
+    DEVLAKE_PLUGINS="$GO_PLUGINS" make all VERSION="$VERSION"
 
-# remove symlink in lib, we will recreate in final image
+# Remove .so symlinks — they will be recreated by ldconfig in the final image
 RUN cd /usr/local/deps/target/lib && \
     for file in *.so* ; do \
         if [ -L $file ] ; then \
@@ -112,11 +140,23 @@ RUN cd /usr/local/deps/target/lib && \
         fi \
     done
 
-
-FROM python:3.9-slim-bookworm as base
+# ---------------------------------------------------------------------------
+# Base runtime stage — minimal Debian image, no Python
+# Pinned to the same snapshot digest as the sysroot stages.
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-20260112-slim AS base
 
 RUN apt-get update && \
-    apt-get install -y python3-dev python3-pip tar pkg-config curl libssh2-1 zlib1g libffi-dev default-libmysqlclient-dev libpq-dev tini git openssh-client corkscrew && \
+    apt-get install -y \
+        libssh2-1 \
+        zlib1g \
+        default-libmysqlclient-dev \
+        libpq-dev \
+        tini \
+        git \
+        openssh-client \
+        corkscrew \
+        ca-certificates && \
     apt-get clean && \
     rm -fr /usr/share/doc/* \
            /usr/share/info/* \
@@ -126,7 +166,6 @@ RUN apt-get update && \
            /usr/share/man/* \
            /usr/share/doc/kde/HTML/* \
            /usr/share/gnome/help/* \
-           /usr/share/locale/* \
            /usr/share/omf/*/*-*.emf \
            /var/lib/apt/lists/*
 
@@ -135,51 +174,40 @@ EXPOSE 8080
 RUN useradd -ms /bin/bash -d /app devlake -u 1010
 RUN chown -R devlake:devlake /etc/ssl/certs
 USER devlake
-ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
 RUN mkdir logs
 VOLUME /app/logs
 
-# Setup Python
-COPY python/ /app/python/
-RUN python3 -m pip install --no-cache --upgrade pip setuptools && \
-    python3 -m pip install --no-cache -r python/requirements.txt && \
-    python3 -m pip install --upgrade pip
-
-# Setup Python Poetry package manager
-RUN curl -sSL https://install.python-poetry.org | python3 - --version 2.2.1
-ENV PATH="$PATH:/app/.local/bin"
-
-# Build Python plugins, make sure the scripts has execute permission
-# RUN find /app/python/ -name "*.sh" | xargs -I{} chmod +x {}
-RUN /app/python/build.sh
-
-FROM base as devlake-base
+# ---------------------------------------------------------------------------
+# Final image
+# ---------------------------------------------------------------------------
+FROM base AS devlake-base
 ARG DEBUG=
 
-# libraries
+# Set up shared libraries from the build stage
 ENV LD_LIBRARY_PATH=/app/libs
 RUN mkdir -p /app/libs
 COPY --from=build /usr/local/deps/target/lib/*.so* /app/libs
 COPY --from=build /go/bin /usr/bin
 RUN ldconfig -vn /app/libs
 
-# apps
+# Copy compiled binaries and resources
 COPY --from=build /app/bin /app/bin
 COPY --from=build /app/resources /app/resources
 
 ENV PATH="/app/bin:${PATH}"
 ENV DEBUG="$DEBUG"
+ENV DISABLED_REMOTE_PLUGINS=true
 
+# Ensure the app directory is group-writable for OpenShift / arbitrary UID support
 USER root
 RUN chgrp -R 0 /app && \
     chmod -R g=u /app
 USER devlake
 
-#add tini, prevent zombie process
+# Use tini as PID 1 to reap zombie processes
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 CMD ["lake"]
-
