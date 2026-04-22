@@ -141,10 +141,13 @@ RUN cd /usr/local/deps/target/lib && \
     done
 
 # ---------------------------------------------------------------------------
-# Base runtime stage — minimal Debian image, no Python
-# Pinned to the same snapshot digest as the sysroot stages.
+# Base runtime stage — minimal Debian image, no Python.
+# Intentionally uses a floating tag (not pinned) so that regular rebuilds
+# automatically pick up the latest OS-level security patches from Debian.
+# The sysroot and builder stages above are pinned for build reproducibility,
+# but the runtime base should stay current.
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-20260112-slim AS base
+FROM debian:bookworm-slim AS base
 
 RUN apt-get update && \
     apt-get install -y \
