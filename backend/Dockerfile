@@ -40,7 +40,7 @@ RUN apt-get update && \
 # Builder stage — compiles libgit2 for both aarch64 and x86_64, then builds
 # all Go binaries and plugins.
 # ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.23.12-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.9-bookworm AS builder
 
 # docker build --build-arg GOPROXY=https://goproxy.io,direct -t mericodev/lake .
 ARG GOPROXY=
@@ -62,8 +62,8 @@ RUN if [ "$(arch)" != "x86_64" ] ; then \
         apt-get install -y gcc-x86-64-linux-gnu binutils-x86-64-linux-gnu ; \
     fi
 
-RUN go install github.com/vektra/mockery/v2@v2.42.0
-RUN go install github.com/swaggo/swag/cmd/swag@v1.16.1
+# mockery and swag are dev/CI tools only — not needed in the Docker image build.
+# They are intentionally not installed here to avoid CVEs and Go version incompatibilities.
 
 # Copy arch-specific sysroots for cross-compilation
 COPY --from=debian-amd64 /usr/include /rootfs-amd64/usr/include
@@ -130,7 +130,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     fi && \
     export PKG_CONFIG_PATH=/usr/local/deps/target/lib/pkgconfig && \
     export CGO_ENABLED=1 && \
-    DEVLAKE_PLUGINS="$GO_PLUGINS" make all VERSION="$VERSION"
+    DEVLAKE_PLUGINS="$GO_PLUGINS" make build-plugin VERSION="$VERSION" && \
+    VERSION="$VERSION" scripts/build-server.sh
 
 # Remove .so symlinks — they will be recreated by ldconfig in the final image
 RUN cd /usr/local/deps/target/lib && \
@@ -193,7 +194,8 @@ ARG DEBUG=
 ENV LD_LIBRARY_PATH=/app/libs
 RUN mkdir -p /app/libs
 COPY --from=build /usr/local/deps/target/lib/*.so* /app/libs
-COPY --from=build /go/bin /usr/bin
+# /go/bin is intentionally NOT copied — it contains only dev tooling (mockery, swag)
+# that has no runtime purpose and introduces unnecessary CVEs in security scans.
 RUN ldconfig -vn /app/libs
 
 # Copy compiled binaries and resources
