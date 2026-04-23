@@ -23,7 +23,14 @@
 #While incubation status is not necessarily a reflection of the completeness or stability of the code,
 #it does indicate that the project has yet to be fully endorsed by the ASF.
 
-FROM node:18-bookworm-slim as builder
+# Use BUILDPLATFORM so the Node builder runs natively on the build host (e.g.
+# arm64 on Apple Silicon) rather than under x64 emulation. This avoids the
+# esbuild Go runtime crash (lfstack.push invalid packing) that occurs when
+# Go binaries compiled for x64 run under Rosetta 2 / QEMU in Rancher Desktop.
+# Only the compiled static assets are copied to the final nginx image, so the
+# builder platform has no effect on the runtime image architecture.
+# Node 22 LTS (replaces EOL Node 18).
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS builder
 
 WORKDIR /home/node/code
 COPY . .
@@ -47,4 +54,4 @@ RUN chmod +x /usr/bin/nginx.sh
 RUN chgrp -R 0 /etc/nginx /var/log/nginx /usr/share/nginx /run && \
     chmod -R g=u /etc/nginx /var/log/nginx /usr/share/nginx /run
 USER 101
-CMD /usr/bin/nginx.sh
+CMD ["/usr/bin/nginx.sh"]
