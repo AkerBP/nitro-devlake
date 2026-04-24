@@ -30,7 +30,7 @@
 # Only the compiled static assets are copied to the final nginx image, so the
 # builder platform has no effect on the runtime image architecture.
 # Node 22 LTS (replaces EOL Node 18).
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS builder
+FROM --platform=$BUILDPLATFORM node:22-trixie-slim AS builder
 
 WORKDIR /home/node/code
 COPY . .

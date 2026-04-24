@@ -26,13 +26,13 @@
 # ---------------------------------------------------------------------------
 # Sysroot stages — provide arch-specific headers and shared libs for
 # cross-compiling libgit2 and the Go plugins in the builder stage.
-# Pinned to a specific Debian bookworm snapshot for reproducibility.
+# Pinned to a specific Debian trixie snapshot for reproducibility.
 # ---------------------------------------------------------------------------
-FROM --platform=linux/amd64 debian:bookworm-20260112 AS debian-amd64
+FROM --platform=linux/amd64 debian:trixie-20260421 AS debian-amd64
 RUN apt-get update && \
     apt-get install -y libssh2-1-dev libssl-dev zlib1g-dev
 
-FROM --platform=linux/arm64 debian:bookworm-20260112 AS debian-arm64
+FROM --platform=linux/arm64 debian:trixie-20260421 AS debian-arm64
 RUN apt-get update && \
     apt-get install -y libssh2-1-dev libssl-dev zlib1g-dev
 
@@ -40,7 +40,7 @@ RUN apt-get update && \
 # Builder stage — compiles libgit2 for both aarch64 and x86_64, then builds
 # all Go binaries and plugins.
 # ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.25.9-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.9-trixie AS builder
 
 # docker build --build-arg GOPROXY=https://goproxy.io,direct -t mericodev/lake .
 ARG GOPROXY=
@@ -142,13 +142,13 @@ RUN cd /usr/local/deps/target/lib && \
     done
 
 # ---------------------------------------------------------------------------
-# Base runtime stage — minimal Debian image, no Python.
+# Base runtime stage — minimal Debian trixie image, no Python.
 # Intentionally uses a floating tag (not pinned) so that regular rebuilds
 # automatically pick up the latest OS-level security patches from Debian.
 # The sysroot and builder stages above are pinned for build reproducibility,
 # but the runtime base should stay current.
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim AS base
+FROM debian:trixie-slim AS base
 
 RUN apt-get update && \
     apt-get install -y \
