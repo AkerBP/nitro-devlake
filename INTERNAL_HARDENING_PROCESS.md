@@ -1094,10 +1094,12 @@ git cherry-pick <hardening-commit-1> <hardening-commit-2> <hardening-commit-3>
 # Build backend image
 VERSION=v1.0.3-beta12-harden.1
 BACKEND_IMAGE=registry.example.com/devlake:${VERSION}
+PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,issue_trace,linker,org,refdiff,webhook
 
 docker build \
   --pull \
   --build-arg VERSION=${VERSION} \
+  --build-arg GO_PLUGINS=${PRODUCTION_GO_PLUGINS} \
   -f backend/Dockerfile \
   -t ${BACKEND_IMAGE} \
   backend
@@ -1147,10 +1149,12 @@ git cherry-pick <hardening-commit-1> <hardening-commit-2> <hardening-commit-3>
 # Build backend image with explicit main-snapshot version string
 VERSION=${LATEST_OFFICIAL_TAG}-main.${DATE}.${MAIN_SHA}-harden.1
 BACKEND_IMAGE=registry.example.com/devlake:${VERSION}
+PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,issue_trace,linker,org,refdiff,webhook
 
 docker build \
   --pull \
   --build-arg VERSION=${VERSION} \
+  --build-arg GO_PLUGINS=${PRODUCTION_GO_PLUGINS} \
   -f backend/Dockerfile \
   -t ${BACKEND_IMAGE} \
   backend
@@ -1188,8 +1192,10 @@ Example source profile:
 Latest official tag marker: v1.0.3-beta12
 Actual upstream source:     upstream/main@5e9dfb8b8
 Hardening branch:          harden/v1.0.3-beta12-main-20260603-5e9dfb8b8
-Hardening commit:          c088bd9ab
-Version string:            v1.0.3-beta12-main.20260603.5e9dfb8b8-harden.1
+Source hardening commit:   c088bd9ab
+Documentation commits:     4b350b87d, 2c26b853e, 71151021f
+Last used image counter:   harden.2
+Version string:            v1.0.3-beta12-main.20260603.5e9dfb8b8-harden.2
 ```
 
 Example CVE input from Trivy Operator reports:
@@ -1197,6 +1203,24 @@ Example CVE input from Trivy Operator reports:
 - backend report had 3 critical CVEs;
 - config-ui report had 2 critical CVEs;
 - affected areas included Debian `libgnutls30t64` and Go module `github.com/jackc/pgx/v5`.
+
+Release counter note:
+
+- `harden.1` was superseded before publishing/deployment because the backend production plugin profile was missing `issue_trace` and `linker`.
+- `harden.2` is the current image counter for this source line.
+- The next image built from this source line should use `harden.3` unless a newer upstream base/tag is chosen.
+- The config-ui image content did not change between `harden.1` and `harden.2`, but it was tagged with the matching `harden.2` version for deployment consistency.
+
+Current local image IDs before push:
+
+```text
+Backend image:   hubnitroplatformacr.azurecr.io/apache/devlake:v1.0.3-beta12-main.20260603.5e9dfb8b8-harden.2
+Backend ID:      sha256:df5e0332fe002aa5a628950eb80bdd80ec92e258187b146d2bd781c8aaa3f7f7
+Backend plugins: customize,dora,gitextractor,github,github_graphql,issue_trace,linker,org,refdiff,webhook
+
+Config UI image: hubnitroplatformacr.azurecr.io/apache/devlake-config-ui:v1.0.3-beta12-main.20260603.5e9dfb8b8-harden.2
+Config UI ID:    sha256:052ce8151d5abb813e8f9a3e5415e86fed94ce256b20e2504a76eabef54d6a74
+```
 
 Example remediation/verification steps performed:
 
