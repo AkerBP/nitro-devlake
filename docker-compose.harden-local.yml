@@ -1,8 +1,8 @@
 # Internal/local hardened-image smoke test compose file.
 #
-# This file is intentionally untracked and should not be committed upstream.
-# It is meant to validate locally built hardened backend/config-ui images with
-# a real database before publishing them.
+# This file is internal to hardening branches and should not be committed
+# upstream or merged back to main. It is meant to validate locally built
+# hardened backend/config-ui images with a real database before publishing them.
 #
 # Usage:
 #   source ./devlake_env.sh
@@ -30,6 +30,8 @@ services:
       - postgres-storage:/var/lib/postgresql/data
 
   devlake:
+    # Default image name assumes the production plugin profile:
+    # customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
     image: ${DEVLAKE_IMAGE:-devlake-backend:harden-local-subset}
     ports:
       - "${DEVLAKE_PORT:-18080}:8080"

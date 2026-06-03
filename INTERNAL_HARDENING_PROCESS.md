@@ -430,6 +430,35 @@ Common config UI hardening changes may include:
 - using exec-form `CMD`;
 - ensuring frontend build changes do not affect runtime architecture assumptions.
 
+### 9.4 Production plugin profile
+
+Our current production deployment does not require every DevLake connector plugin. The intended hardened backend image should include:
+
+- the GitHub connector plugin(s), because GitHub is the only repository data source used;
+- the webhook connector, because deployments are signalled via webhook;
+- the standard/core operation plugins needed by DevLake's normal project mapping, Git extraction, DORA/refdiff, and supporting flows.
+
+Current production plugin profile:
+
+```text
+customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
+```
+
+Interpretation:
+
+| Plugin | Why included |
+| --- | --- |
+| `github` | Primary GitHub repository connector. |
+| `github_graphql` | GitHub GraphQL-backed collection used by the GitHub integration. |
+| `webhook` | Deployment/event signalling endpoint. |
+| `gitextractor` | Core Git extraction support. |
+| `refdiff` | Commit/ref diff support used by metrics flows. |
+| `dora` | DORA metric calculation. |
+| `org` | Project/user/account mapping support. |
+| `customize` | Standard supporting/custom data plugin used by DevLake flows/UI. |
+
+Do not reduce the production image to only `github,webhook`; that omits core operation plugins required for normal DevLake functionality. Conversely, do not build all connector plugins unless there is a concrete need, because unnecessary plugins increase build time, runtime footprint, and scan surface.
+
 ## 10. Building Images
 
 ### 10.1 Backend image from official tag profile
@@ -437,10 +466,12 @@ Common config UI hardening changes may include:
 ```bash
 VERSION=v1.0.3-beta12-harden.1
 IMAGE=registry.example.com/devlake:${VERSION}
+PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
 
 docker build \
   --pull \
   --build-arg VERSION=${VERSION} \
+  --build-arg GO_PLUGINS=${PRODUCTION_GO_PLUGINS} \
   -f backend/Dockerfile \
   -t ${IMAGE} \
   backend
@@ -451,10 +482,12 @@ docker build \
 ```bash
 VERSION=v1.0.3-beta12-main.20260603.abc1234-harden.1
 IMAGE=registry.example.com/devlake:${VERSION}
+PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
 
 docker build \
   --pull \
   --build-arg VERSION=${VERSION} \
+  --build-arg GO_PLUGINS=${PRODUCTION_GO_PLUGINS} \
   -f backend/Dockerfile \
   -t ${IMAGE} \
   backend
@@ -465,11 +498,13 @@ docker build \
 ```bash
 VERSION=v1.0.3-beta12-harden.1
 IMAGE=registry.example.com/devlake:${VERSION}
+PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
 
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   --pull \
   --build-arg VERSION=${VERSION} \
+  --build-arg GO_PLUGINS=${PRODUCTION_GO_PLUGINS} \
   -f backend/Dockerfile \
   -t ${IMAGE} \
   --push \
@@ -594,6 +629,8 @@ Default local image names:
 devlake-backend:harden-local-subset
 devlake-config-ui:harden-local
 ```
+
+The default backend image name assumes the production plugin profile described in section 9.4.
 
 The defaults can be overridden with environment variables:
 
@@ -1017,6 +1054,7 @@ Before promoting a hardened DevLake image:
 - [ ] Hardening changes are limited to container/dependency/security work and necessary upstream fixes.
 - [ ] Backend image builds successfully.
 - [ ] Config UI image builds successfully, if applicable.
+- [ ] Backend image was built with the intended production plugin profile unless there is a documented exception.
 - [ ] `VERSION` build argument is set correctly.
 - [ ] Backend container starts successfully.
 - [ ] Config UI container starts successfully.
@@ -1172,8 +1210,9 @@ Example remediation/verification steps performed:
 - ran `go mod verify`;
 - ran `go list -m all` and checked key remediated module versions;
 - ran fast backend tests: `go test ./core/version ./core/config ./core/runner`;
-- built the backend image with all plugins;
-- built the backend image with the plugin subset from `devlake_env.sh`;
+- built the backend image with all plugins during local comparison/testing;
+- built the final backend image with the production plugin profile from section 9.4;
+- verified the final backend image contained `customize`, `dora`, `gitextractor`, `github`, `github_graphql`, `org`, `refdiff`, and `webhook` plugins;
 - built the config-ui image;
 - scanned backend and UI images with Trivy for `CRITICAL,HIGH` fixed vulnerabilities;
 - confirmed backend and UI scans reported zero critical/high findings at the time of validation;
