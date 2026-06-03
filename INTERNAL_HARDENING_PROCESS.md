@@ -441,7 +441,7 @@ Our current production deployment does not require every DevLake connector plugi
 Current production plugin profile:
 
 ```text
-customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
+customize,dora,gitextractor,github,github_graphql,issue_trace,linker,org,refdiff,webhook
 ```
 
 Interpretation:
@@ -452,12 +452,14 @@ Interpretation:
 | `github_graphql` | GitHub GraphQL-backed collection used by the GitHub integration. |
 | `webhook` | Deployment/event signalling endpoint. |
 | `gitextractor` | Core Git extraction support. |
-| `refdiff` | Commit/ref diff support used by metrics flows. |
+| `refdiff` | Commit/ref diff support used by DORA/metrics flows. |
 | `dora` | DORA metric calculation. |
+| `issue_trace` | Default project metric plugin for issue status/assignee history. |
+| `linker` | Optional/core PR-to-issue linking metric plugin used by project settings. |
 | `org` | Project/user/account mapping support. |
 | `customize` | Standard supporting/custom data plugin used by DevLake flows/UI. |
 
-Do not reduce the production image to only `github,webhook`; that omits core operation plugins required for normal DevLake functionality. Conversely, do not build all connector plugins unless there is a concrete need, because unnecessary plugins increase build time, runtime footprint, and scan surface.
+Do not reduce the production image to only `github,webhook`; that omits core operation plugins required for normal DevLake functionality. In particular, new projects created by the UI enable `dora` and `issue_trace` metrics by default, and project settings can enable `linker`. Conversely, do not build all connector plugins unless there is a concrete need, because unnecessary plugins increase build time, runtime footprint, and scan surface.
 
 ## 10. Building Images
 
@@ -466,7 +468,7 @@ Do not reduce the production image to only `github,webhook`; that omits core ope
 ```bash
 VERSION=v1.0.3-beta12-harden.1
 IMAGE=registry.example.com/devlake:${VERSION}
-PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
+PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,issue_trace,linker,org,refdiff,webhook
 
 docker build \
   --pull \
@@ -482,7 +484,7 @@ docker build \
 ```bash
 VERSION=v1.0.3-beta12-main.20260603.abc1234-harden.1
 IMAGE=registry.example.com/devlake:${VERSION}
-PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
+PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,issue_trace,linker,org,refdiff,webhook
 
 docker build \
   --pull \
@@ -498,7 +500,7 @@ docker build \
 ```bash
 VERSION=v1.0.3-beta12-harden.1
 IMAGE=registry.example.com/devlake:${VERSION}
-PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
+PRODUCTION_GO_PLUGINS=customize,dora,gitextractor,github,github_graphql,issue_trace,linker,org,refdiff,webhook
 
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
@@ -1212,7 +1214,7 @@ Example remediation/verification steps performed:
 - ran fast backend tests: `go test ./core/version ./core/config ./core/runner`;
 - built the backend image with all plugins during local comparison/testing;
 - built the final backend image with the production plugin profile from section 9.4;
-- verified the final backend image contained `customize`, `dora`, `gitextractor`, `github`, `github_graphql`, `org`, `refdiff`, and `webhook` plugins;
+- verified the final backend image contained `customize`, `dora`, `gitextractor`, `github`, `github_graphql`, `issue_trace`, `linker`, `org`, `refdiff`, and `webhook` plugins;
 - built the config-ui image;
 - scanned backend and UI images with Trivy for `CRITICAL,HIGH` fixed vulnerabilities;
 - confirmed backend and UI scans reported zero critical/high findings at the time of validation;

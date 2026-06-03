@@ -31,7 +31,7 @@ services:
 
   devlake:
     # Default image name assumes the production plugin profile:
-    # customize,dora,gitextractor,github,github_graphql,org,refdiff,webhook
+    # customize,dora,gitextractor,github,github_graphql,issue_trace,linker,org,refdiff,webhook
     image: ${DEVLAKE_IMAGE:-devlake-backend:harden-local-subset}
     ports:
       - "${DEVLAKE_PORT:-18080}:8080"
