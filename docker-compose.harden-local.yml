@@ -1,0 +1,68 @@
+# Internal/local hardened-image smoke test compose file.
+#
+# This file is intentionally untracked and should not be committed upstream.
+# It is meant to validate locally built hardened backend/config-ui images with
+# a real database before publishing them.
+#
+# Usage:
+#   source ./devlake_env.sh
+#   docker compose -p devlake-harden-test -f docker-compose.harden-local.yml up -d
+#   curl -fsS http://localhost:${DEVLAKE_PORT:-18080}/health
+#   curl -fsS http://localhost:${DEVLAKE_PORT:-18080}/ready
+#   curl -fsS http://localhost:${DEVLAKE_PORT:-18080}/version
+#   curl -fsSI http://localhost:${CONFIG_UI_PORT:-14000}/
+#   docker compose -p devlake-harden-test -f docker-compose.harden-local.yml down -v
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17.2}
+    environment:
+      POSTGRES_DB: lake
+      POSTGRES_USER: merico
+      POSTGRES_PASSWORD: merico
+      TZ: UTC
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U merico -d lake"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres-storage:/var/lib/postgresql/data
+
+  devlake:
+    image: ${DEVLAKE_IMAGE:-devlake-backend:harden-local-subset}
+    ports:
+      - "${DEVLAKE_PORT:-18080}:8080"
+    environment:
+      ENCRYPTION_SECRET: ${ENCRYPTION_SECRET:?ENCRYPTION_SECRET is required; source ./devlake_env.sh first}
+      DB_URL: postgres://merico:merico@postgres:5432/lake?sslmode=disable
+      E2E_DB_URL: postgres://merico:merico@postgres:5432/lake_test?sslmode=disable
+      FORCE_MIGRATION: "true"
+      DISABLED_REMOTE_PLUGINS: "true"
+      REMOTE_PLUGIN_DIR: ""
+      LOGGING_DIR: /app/logs
+      MODE: release
+      # Local smoke testing only. Production deployments should use the
+      # organization's normal auth configuration.
+      AUTH_ENABLED: "false"
+      TZ: UTC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - devlake-log:/app/logs
+
+  config-ui:
+    image: ${DEVLAKE_CONFIG_UI_IMAGE:-devlake-config-ui:harden-local}
+    ports:
+      - "${CONFIG_UI_PORT:-14000}:4000"
+    environment:
+      DEVLAKE_ENDPOINT: devlake:8080
+      GRAFANA_ENDPOINT: grafana:3000
+      TZ: UTC
+    depends_on:
+      - devlake
+
+volumes:
+  postgres-storage:
+  devlake-log:
