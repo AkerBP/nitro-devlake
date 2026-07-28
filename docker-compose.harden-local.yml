@@ -1,0 +1,54 @@
+# Local hardened-image smoke test (INTERNAL, do not commit upstream).
+# Starts PostgreSQL + the locally built hardened backend and config-ui images.
+# See hardening-related-do-not-commit/INTERNAL_HARDENING_PROCESS.md section 11.6.
+name: devlake-harden-test
+
+services:
+  postgres:
+    image: postgres:17.2
+    restart: always
+    environment:
+      POSTGRES_DB: lake
+      POSTGRES_USER: merico
+      POSTGRES_PASSWORD: merico
+      TZ: UTC
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U merico -d lake"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  devlake:
+    image: ${DEVLAKE_IMAGE:-devlake-backend:harden-local-subset}
+    restart: always
+    ports:
+      - "${DEVLAKE_PORT:-18080}:8080"
+    environment:
+      DB_URL: postgres://merico:merico@postgres:5432/lake?sslmode=disable
+      ENCRYPTION_SECRET: ${ENCRYPTION_SECRET:-harden_local_smoke_test_secret}
+      DISABLED_REMOTE_PLUGINS: "true"
+      REMOTE_PLUGIN_DIR: ""
+      FORCE_MIGRATION: "true"
+      AUTH_ENABLED: "false"
+      LOGGING_DIR: /app/logs
+      TZ: UTC
+    volumes:
+      - devlake-log:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  config-ui:
+    image: ${DEVLAKE_CONFIG_UI_IMAGE:-devlake-config-ui:harden-local}
+    restart: always
+    ports:
+      - "${CONFIG_UI_PORT:-14000}:4000"
+    environment:
+      DEVLAKE_ENDPOINT: devlake:8080
+      GRAFANA_ENDPOINT: grafana:3000
+      TZ: UTC
+    depends_on:
+      - devlake
+
+volumes:
+  devlake-log:
