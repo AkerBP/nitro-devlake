@@ -68,19 +68,31 @@ RUN if [ "$(arch)" != "x86_64" ] ; then \
 # github.com/swaggo/swag/cmd/swag@v1.16.6 for its own CI use only.)
 
 # Copy arch-specific sysroots for cross-compilation
+# NOTE: Debian trixie's linux-libc-dev moved the kernel UAPI headers to the
+# arch-independent /usr/lib/linux/uapi/<arch>/ tree; /usr/include/<triplet>/asm/*
+# are now just symlinks into it (e.g. .../asm/errno.h -> ../../../lib/linux/uapi/arm64/asm/errno.h).
+# Without copying /usr/lib/linux too, those symlinks dangle and any cross/native
+# build targeting the sysroot fails with "asm/errno.h: No such file or directory".
 COPY --from=debian-amd64 /usr/include /rootfs-amd64/usr/include
 COPY --from=debian-amd64 /usr/lib/x86_64-linux-gnu /rootfs-amd64/usr/lib/x86_64-linux-gnu
+COPY --from=debian-amd64 /usr/lib/linux /rootfs-amd64/usr/lib/linux
 COPY --from=debian-amd64 /lib/x86_64-linux-gnu /rootfs-amd64/lib/x86_64-linux-gnu
 
 COPY --from=debian-arm64 /usr/include /rootfs-arm64/usr/include
 COPY --from=debian-arm64 /usr/lib/aarch64-linux-gnu /rootfs-arm64/usr/lib/aarch64-linux-gnu
+COPY --from=debian-arm64 /usr/lib/linux /rootfs-arm64/usr/lib/linux
 COPY --from=debian-arm64 /lib/aarch64-linux-gnu /rootfs-arm64/lib/aarch64-linux-gnu
 
 # Remove static libraries from sysroots — not needed at runtime, reduces image size
 RUN find /rootfs-amd64 /rootfs-arm64 -name '*.a' -delete
 
 # Cross-compile libgit2 v1.5.0 for both aarch64 and x86_64
-RUN for arch in aarch64 x86_64 ; do \
+# set -e: without it, a failure in one loop iteration (e.g. a missing sysroot
+# header) is silently swallowed by `&&` short-circuiting within that iteration,
+# the for-loop just continues to the next arch, and the RUN step exits 0 with
+# only one of the two arches actually installed under /usr/local/deps.
+RUN set -e; \
+    for arch in aarch64 x86_64 ; do \
         mkdir -p /tmp/build/${arch} && cd /tmp/build/${arch} && \
         wget https://github.com/libgit2/libgit2/archive/refs/tags/v1.5.0.tar.gz -O - | tar -xz && \
         cd libgit2-1.5.0 && \
