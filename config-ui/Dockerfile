@@ -41,10 +41,13 @@ WORKDIR /usr/share/nginx/html
 RUN rm -rf ./*
 COPY --from=builder /home/node/code/dist/. ./
 EXPOSE 4000 4443
-# apt-get upgrade picks up Debian security fixes that the base tag does not contain yet
+# apt-get upgrade picks up Debian security fixes that the base tag does not contain yet.
+# The xslt/njs nginx modules are not loaded; purging them drops libxml2 (CVE-2026-6653, no Debian fix).
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y apache2-utils iproute2 && \
+    apt-get purge -y nginx-module-xslt nginx-module-njs libxslt1.1 libxml2 && \
+    apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=builder /home/node/code/nginx.sh /usr/bin/nginx.sh
